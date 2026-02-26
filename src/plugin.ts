@@ -209,7 +209,7 @@ export const KimiRotatorPlugin: Plugin = async ({ client }) => {
                 bodyLower.includes(pattern)
               );
 
-              if (isBillingLimit && accountManager) {
+              if (isBillingLimit) {
                 let shouldRetry = false;
 
                 if (isHardBillingLimit) {
