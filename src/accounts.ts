@@ -125,18 +125,7 @@ export class KimiAccountManager {
     const REQUIRED_HITS = 2;
 
     if (newHits >= REQUIRED_HITS) {
-      const newHealthScore = Math.max(0, account.healthScore - 30);
-      const now = new Date();
-      const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
-      const cooldownUntil = endOfDay.getTime();
-
-      await this.storage.updateAccount(index, {
-        healthScore: newHealthScore,
-        billingLimitResetTime: cooldownUntil,
-        consecutiveBillingLimitHits: newHits,
-        consecutiveFailures: account.consecutiveFailures + 1,
-      });
-
+      await this.applyBillingLimitCooldown(index, account, newHits);
       return { isConfirmed: true, hitsNeeded: 0 };
     } else {
       await this.storage.updateAccount(index, {
@@ -149,17 +138,7 @@ export class KimiAccountManager {
 
   async markAccountBillingLimited(index: number): Promise<void> {
     const account = await this.getAccount(index);
-    const newHealthScore = Math.max(0, account.healthScore - 30);
-    const now = new Date();
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
-    const cooldownUntil = endOfDay.getTime();
-
-    await this.storage.updateAccount(index, {
-      healthScore: newHealthScore,
-      billingLimitResetTime: cooldownUntil,
-      consecutiveBillingLimitHits: 2,
-      consecutiveFailures: account.consecutiveFailures + 1,
-    });
+    await this.applyBillingLimitCooldown(index, account, 2);
   }
 
   async resetBillingLimitHits(index: number): Promise<void> {
@@ -188,7 +167,7 @@ export class KimiAccountManager {
   }
 
   async getActiveKey(): Promise<string | null> {
-    const account = await this.getNextAccount();
+    const account = await this.getCurrentAccount();
     return account?.account.key ?? null;
   }
 
@@ -409,13 +388,13 @@ export class KimiAccountManager {
     let soonestIndex = 0;
     let soonestTime = Math.max(
       config.accounts[0].rateLimitResetTime,
-      config.accounts[0].billingLimitResetTime ?? 0
+      config.accounts[0].billingLimitResetTime
     );
 
     for (let i = 1; i < config.accounts.length; i++) {
       const accountReadyTime = Math.max(
         config.accounts[i].rateLimitResetTime,
-        config.accounts[i].billingLimitResetTime ?? 0
+        config.accounts[i].billingLimitResetTime
       );
       if (accountReadyTime < soonestTime) {
         soonestTime = accountReadyTime;
@@ -429,8 +408,26 @@ export class KimiAccountManager {
   private isRateLimited(account: KimiAccount): boolean {
     const now = Date.now();
     const rateLimited = account.rateLimitResetTime > now;
-    const billingLimited = (account.billingLimitResetTime ?? 0) > now;
+    const billingLimited = account.billingLimitResetTime > now;
     return rateLimited || billingLimited;
+  }
+
+  private getEndOfDayTime(): number {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0).getTime();
+  }
+
+  private async applyBillingLimitCooldown(
+    index: number,
+    account: KimiAccount,
+    hits: number
+  ): Promise<void> {
+    await this.storage.updateAccount(index, {
+      healthScore: Math.max(0, account.healthScore - 30),
+      billingLimitResetTime: this.getEndOfDayTime(),
+      consecutiveBillingLimitHits: hits,
+      consecutiveFailures: account.consecutiveFailures + 1,
+    });
   }
 
   private async getAccount(index: number): Promise<KimiAccount> {
